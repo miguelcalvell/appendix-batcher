@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0f1115" />
+  <link rel="manifest" href="manifest.json">
+  <title>Appendix Batcher</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Libraries -->
+  <script defer src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Appendix Batcher</h1>
+    <p>Drop/select PNGs & PDFs named like <em>Appendix 1</em>, <em>Appendix 1 (1 of 5)</em>. All processing stays on-device.</p>
+  </header>
+
+  <main>
+    <section class="controls">
+      <div class="row">
+        <label for="files">Input files</label>
+        <input id="files" type="file" multiple accept=".png,.jpg,.jpeg,.pdf" />
+      </div>
+      <div class="row">
+        <label for="headerText">Header (top-right)</label>
+        <input id="headerText" type="text" placeholder="Type header text..." />
+      </div>
+      <div class="row">
+        <label for="targetPages">Target pages per PDF</label>
+        <input id="targetPages" type="number" min="1" value="50" />
+      </div>
+      <div class="row buttons">
+        <button id="runBtn">Run</button>
+        <button id="zipBtn" class="secondary" disabled>Download All as ZIP</button>
+        <button id="clearBtn" class="ghost">Clear</button>
+      </div>
+    </section>
+
+    <section id="log" class="log" aria-live="polite"></section>
+
+    <section id="downloads" class="downloads hidden">
+      <h2>Downloads</h2>
+      <div id="links"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Installable PWA • Works offline • Host this folder on GitHub Pages.</p>
+  </footer>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+</body>
+</html>
