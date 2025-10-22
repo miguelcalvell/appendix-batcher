@@ -38,19 +38,44 @@
   const MARGIN = 36;          // 0.5"
   const HEADER_BAND = 54;     // 0.75"
   const FONT_SIZE = 10;
-  const APP_RE = /^appendix[\s_\-]*([0-9]+)(?:[^\d]*(\d+))?(?:.*?\((\d+)\s*of\s*(\d+)\))?/i;
+
+  // Regex supports numeric OR alphabetic appendix labels, optional bare part number, or (y of Y)
+  // Examples matched:
+  //  "Appendix 12 (3 of 7)"
+  //  "Appendix AA (2 of 5)"
+  //  "Appendix B 4"
+  //  "Appendix 7"
+  const APP_RE = /^appendix[\s_\-]*([A-Z]+|\d+)(?:[^\d(]*?(\d+))?(?:.*?\((\d+)\s*of\s*(\d+)\))?/i;
 
   // ---------- Utils ----------
+  function lettersToOrder(s){
+    // A=1 ... Z=26, AA=27 ...
+    s = s.toUpperCase();
+    let n = 0;
+    for(let i=0;i<s.length;i++){
+      const c = s.charCodeAt(i);
+      if(c<65 || c>90) return null;
+      n = n*26 + (c-64);
+    }
+    return n;
+  }
+
   function parseName(name){
     const base = name.replace(/\.[^/.]+$/, '').trim();
     const m = base.match(APP_RE);
     if(!m) return null;
-    const appendix_num = parseInt(m[1],10);
-    const bare = m[2] ? parseInt(m[2],10) : null;
+    const label = m[1];
+    const isAlpha = /[A-Za-z]/.test(label);
+    const appendix_order = isAlpha ? lettersToOrder(label) : parseInt(label,10);
+    if(appendix_order==null || Number.isNaN(appendix_order)) return null;
+
+    // part_y: prefer (y of Y), else bare number found after label
+    const bareAfter = m[2] ? parseInt(m[2],10) : null;
     const y = m[3] ? parseInt(m[3],10) : null;
     const Y = m[4] ? parseInt(m[4],10) : null;
-    const part_y = (y!=null) ? y : (bare!=null ? bare : null);
-    return { appendix_num, part_y, part_Y: Y };
+    const part_y = (y!=null) ? y : (bareAfter!=null ? bareAfter : null);
+
+    return { appendix_label: label.toString(), appendix_order, part_y, part_Y: Y };
   }
 
   function sortIntoGroups(files){
@@ -61,17 +86,18 @@
       items.push({file:f, name:f.name, key, isPDF:/\.pdf$/i.test(f.name)});
     }
     items.sort((a,b)=>{
-      if(a.key.appendix_num!==b.key.appendix_num) return a.key.appendix_num - b.key.appendix_num;
+      if(a.key.appendix_order!==b.key.appendix_order) return a.key.appendix_order - b.key.appendix_order;
       const ay=a.key.part_y, by=b.key.part_y;
       if(ay==null && by!=null) return 1;
       if(ay!=null && by==null) return -1;
       if(ay!=null && by!=null && ay!==by) return ay-by;
+      // final tiebreaker: original name
       return a.name.localeCompare(b.name);
     });
     const groups=[]; let cur=null;
     for(const it of items){
-      if(!cur || cur.appendix_num!==it.key.appendix_num){
-        cur = { appendix_num: it.key.appendix_num, items: [] };
+      if(!cur || cur.appendix_order!==it.key.appendix_order){
+        cur = { appendix_order: it.key.appendix_order, label: it.key.appendix_label, items: [] };
         groups.push(cur);
       }
       cur.items.push(it);
@@ -165,7 +191,7 @@
       curPages = 0;
     }
 
-    const manifest = [["input_name","appendix_num","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]];
+    const manifest = [["input_name","appendix_label","appendix_order","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]];
 
     for(const group of groups){
       // Count this appendix
@@ -182,7 +208,7 @@
         await finalize();
       }
 
-      log(`Rendering Appendix ${group.appendix_num} (~${appendixPages} pages)`);
+      log(`Rendering Appendix ${group.label} (~${appendixPages} pages)`);
       let batchStartPage = curPages + 1;
 
       for(const it of group.items){
@@ -197,7 +223,6 @@
             for(let i=0;i<total;i++){
               let embedded;
               try {
-                // Use loaded source doc rather than raw bytes (more reliable)
                 const arr = await doc.embedPdf(src, [i]);
                 embedded = arr && arr[0];
               } catch (e) {
@@ -209,7 +234,6 @@
                 continue;
               }
 
-              // Build a new Letter page and draw header + scaled content box
               const page = doc.addPage([LETTER_W, LETTER_H]);
               const right = LETTER_W - MARGIN;
               const textWidth = font.widthOfTextAtSize(label, FONT_SIZE);
@@ -217,8 +241,6 @@
 
               const dstW = LETTER_W - 2*MARGIN;
               const dstH = LETTER_H - (MARGIN + HEADER_BAND) - MARGIN;
-
-              // Source page size comes from src.getPage(i)
               const { width:sW, height:sH } = src.getPage(i).getSize();
               const scale = Math.min(dstW/sW, dstH/sH);
               const drawW = sW*scale, drawH = sH*scale;
@@ -231,7 +253,7 @@
               setProgress((donePages/totalPlannedPages)*100, `Rendering… ${donePages}/${totalPlannedPages} pages`);
             }
 
-            manifest.push([it.name, group.appendix_num, it.key.part_y ?? "", "true", total, batchIdx, batchStartPage, batchStartPage+total-1]);
+            manifest.push([it.name, group.label, group.appendix_order, it.key.part_y ?? "", "true", total, batchIdx, batchStartPage, batchStartPage+total-1]);
             batchStartPage += total;
           }catch(e){
             log(`ERROR: PDF load failed: ${it.name}. Skipped. (${e.message||e})`);
@@ -262,7 +284,7 @@
 
             curPages += 1; donePages += 1;
             setProgress((donePages/totalPlannedPages)*100, `Rendering… ${donePages}/${totalPlannedPages} pages`);
-            manifest.push([it.name, group.appendix_num, it.key.part_y ?? "", "false", 1, batchIdx, batchStartPage, batchStartPage]);
+            manifest.push([it.name, group.label, group.appendix_order, it.key.part_y ?? "", "false", 1, batchIdx, batchStartPage, batchStartPage]);
             batchStartPage += 1;
           }catch(e){
             log(`ERROR: Image failed: ${it.name}. Skipped. (${e.message||e})`);
@@ -274,7 +296,7 @@
     await finalize();
 
     // manifest.csv
-    const csv = [["input_name","appendix_num","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]]
+    const csv = [["input_name","appendix_label","appendix_order","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]]
       .concat(manifest.slice(1))
       .map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(','))
       .join('\\n');

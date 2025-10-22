@@ -31,7 +31,7 @@
       <div id="dropzone" class="dropzone" aria-label="Drop files here">
         <div class="dz-inner">
           <div class="dz-title">Drag & drop files here</div>
-          <div class="dz-sub">PNG / JPG / PDF — names like <em>Appendix 12 (3 of 7)</em></div>
+          <div class="dz-sub">PNG / JPG / PDF — names like <em>Appendix 12 (3 of 7)</em> or <em>Appendix AA (2 of 5)</em></div>
           <div class="dz-or">or</div>
           <button id="pickBtn" class="secondary">Pick files</button>
         </div>
@@ -41,6 +41,10 @@
         <label for="headerText">Header (top-right)</label>
         <input id="headerText" type="text" placeholder="e.g. QA Batch 2025-10-22" />
       </div>
+      <div class="row">
+        <small style="color:#aab2c5">This will print on every page in the safe top-right band as: <strong>&lt;file name&gt; – &lt;your header&gt;</strong>.</small>
+      </div>
+
       <div class="row">
         <label for="targetPages">Target pages per output PDF</label>
         <input id="targetPages" type="number" min="1" value="50" />
