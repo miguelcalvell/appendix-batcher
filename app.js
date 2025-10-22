@@ -1,5 +1,5 @@
 (function(){
-  const VERSION = 'v6.8';
+  const VERSION = 'v6.9';
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
 
   // ---------- State & DOM helpers ----------
@@ -23,6 +23,9 @@
     if(on){ el.classList.remove('hidden'); }
     else { el.classList.add('hidden'); }
   }
+  const raf = () => new Promise(res=>requestAnimationFrame(()=>res()));
+  const delay = (ms) => new Promise(res=>setTimeout(res, ms));
+
   function updateDropzoneBadge(){
     const badge = document.querySelector('#dropzone .dz-title');
     if(!badge) return;
@@ -179,6 +182,8 @@
       async function finalize(){
         if(curPages===0) return;
         showSavingSpinner(true);
+        // Let the spinner paint before heavy work
+        await raf(); await delay(30);
         try{
           const pdfBytes = await doc.save({ updateFieldAppearances:false });
           const blob = new Blob([pdfBytes], {type:'application/pdf'});
@@ -219,7 +224,7 @@
 
         for(const it of arr){
           const label = headerLabelFor(it.name, header);
-          log(`  • ${it.name}${it.isPDF ? '' : ''}`);
+          log(`  • ${it.name}`);
 
           if(it.isPDF){
             try{
