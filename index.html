@@ -1,91 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#0f1115" />
-  <link rel="manifest" href="manifest.json">
-  <title>Appendix Batcher</title>
-  <link rel="stylesheet" href="style.css" />
-  <!-- Libraries -->
-  <script defer src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script defer src="app.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Appendix Batcher</title>
 </head>
 <body>
-  <header class="appbar">
-    <div class="brand">Appendix Batcher</div>
-    <div class="actions">
-      <button id="zipBtn" class="secondary" disabled>Download All as ZIP</button>
-      <button id="clearBtn" class="ghost">Clear</button>
-    </div>
-  </header>
+<div id="app">
+  <h1>Appendix Batcher</h1>
+  <!-- Main App UI goes here -->
+</div>
 
-  <main>
-    <section class="panel controls">
-      <div class="row">
-        <label for="files">Input files</label>
-        <input id="files" type="file" multiple accept=".png,.jpg,.jpeg,.pdf" />
-      </div>
-
-      <div id="dropzone" class="dropzone" aria-label="Drop files here">
-        <div class="dz-inner">
-          <div class="dz-title">Drag & drop files here</div>
-          <div class="dz-sub">PNG / JPG / PDF — names like <em>Appendix 12 (3 of 7)</em> or <em>Appendix AA (2 of 5)</em></div>
-          <div class="dz-or">or</div>
-          <button id="pickBtn" class="secondary">Pick files</button>
-        </div>
-      </div>
-
-      <div class="row">
-        <label for="headerText">Header (top-right)</label>
-        <input id="headerText" type="text" placeholder="e.g. QA Batch 2025-10-22" />
-      </div>
-      <div class="row">
-        <small style="color:#aab2c5">This will print on every page in the safe top-right band as: <strong>&lt;file name&gt; – &lt;your header&gt;</strong>.</small>
-      </div>
-
-      <div class="row">
-        <label for="targetPages">Target pages per output PDF</label>
-        <input id="targetPages" type="number" min="1" value="50" />
-      </div>
-      <div class="row row-inline">
-        <label class="switch">
-          <input id="keepHistory" type="checkbox" />
-          <span>Keep previous results (don’t clear links)</span>
-        </label>
-      </div>
-      <div class="row">
-        <button id="runBtn">Run</button>
-      </div>
-
-      <div class="progress-wrap">
-        <div id="progressText" class="progress-text">Idle</div>
-        <div class="progressbar"><div id="progressBar" class="progressbar-fill" style="width:0%"></div></div>
-        <div id="savingSpinner" class="spinner hidden" aria-live="polite" title="Saving PDF…"></div>
-      </div>
-    </section>
-
-    <section class="panel twin">
-      <div class="col">
-        <h2>Log</h2>
-        <div id="log" class="log" aria-live="polite"></div>
-      </div>
-      <div class="col">
-        <h2>Downloads</h2>
-        <div id="links" class="links"></div>
-      </div>
-    </section>
-  </main>
-
-  <footer>
-    <p>All processing is local in your browser. No data is uploaded. <span id="version"></span></p>
-  </footer>
-
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
-    }
-  </script>
+<footer style="text-align:center;margin-top:40px;font-size:0.9em;color:#555;">
+  <p id="statusText">No data uploaded.</p>
+  <p class="footer-text">
+    v6.10 — This utility assists in preparing and labeling validation appendices.
+    User-entered text is overlaid for identification only; no source data are modified, stored, or electronically signed.
+    <a href="legal.html" target="_blank" style="color:#004aad;text-decoration:none;font-weight:bold;">Legal / Documentation →</a>
+  </p>
+</footer>
 </body>
 </html>
