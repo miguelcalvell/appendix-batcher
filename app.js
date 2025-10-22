@@ -1,5 +1,5 @@
 (function(){
-  const VERSION = 'v6.9';
+  const VERSION = 'v6.10';
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
 
   // ---------- State & DOM helpers ----------
@@ -149,6 +149,7 @@
     if(state.running) return;
     state.running = true;
     $('runBtn').disabled = true;
+    showSavingSpinner(false); // ensure hidden at start
     try{
       if(!$('keepHistory').checked){ $('links').innerHTML=''; state.outputs.length=0; }
       clearLog(); setProgress(0,'Scanning files…');
@@ -182,8 +183,7 @@
       async function finalize(){
         if(curPages===0) return;
         showSavingSpinner(true);
-        // Let the spinner paint before heavy work
-        await raf(); await delay(30);
+        await raf(); await delay(30); // let spinner paint
         try{
           const pdfBytes = await doc.save({ updateFieldAppearances:false });
           const blob = new Blob([pdfBytes], {type:'application/pdf'});
@@ -316,6 +316,7 @@
       setProgress(100, 'Done.');
       log('Done.');
     } finally {
+      showSavingSpinner(false); // ensure hidden no matter what
       state.running = false;
       $('runBtn').disabled = false;
       const ver = document.getElementById('version'); if(ver){ ver.textContent = VERSION; }
@@ -332,7 +333,7 @@
   $('clearBtn').addEventListener('click', ()=>{
     state.queue.length=0; state.queuedCount=0; updateDropzoneBadge();
     $('headerText').value=''; $('targetPages').value=50; $('links').innerHTML='';
-    clearLog(); setProgress(0,'Idle');
+    clearLog(); setProgress(0,'Idle'); showSavingSpinner(false);
   });
   $('zipBtn').disabled = true;
 
