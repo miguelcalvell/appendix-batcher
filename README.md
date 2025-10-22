@@ -1,11 +1,12 @@
-# Appendix Batcher — Fixed Header + UI
+# Appendix Batcher — v6
 
-- Prints **`<filename without extension> – <your header text>`** in the **safe top-right band** on **every page** (PDF pages and images).
-- Visible **drag & drop** area + file picker.
-- Compact **log** (last ~500 lines) and **progress bar**.
-- PDF handling more robust (`ignoreEncryption`, graceful skip on errors).
-- Chunking still respects **never split an appendix**.
+**Fixes & Improvements**
+- Prints **`<filename without extension> – <your header text>`** in the **safe top-right band** on **every page**.
+- Drag-and-drop works across desktop & iOS; no `DataTransfer()` dependency.
+- Compact UI (sticky app bar, capped log, progress bar).
+- ZIP built from in-memory blobs (no `fetch(blob:)` issues).
+- Robust PDF handling: `ignoreEncryption:true`, graceful skip on errors.
+- Service worker cache **v6** to force clients to pull the update.
 
 ## Deploy
-Replace files in your repo root: `index.html`, `style.css`, `app.js`, `sw.js`, `manifest.json`.
-Then hard-refresh your site. (Service worker cache bumped to **v5**.)
+Replace files in your repo root with these versions. Then hard-refresh the site.

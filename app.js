@@ -1,8 +1,9 @@
 (function(){
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
 
-  // ---------- DOM helpers ----------
+  // ---------- State & DOM helpers ----------
   const $ = (id)=>document.getElementById(id);
+  const state = { queue: [], outputs: [] };
   const logBuf = [];
   function log(msg){
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
@@ -16,11 +17,15 @@
     $('progressBar').style.width = `${Math.max(0,Math.min(100,pct))}%`;
     if(text) $('progressText').textContent = text;
   }
+  function addToQueue(files){
+    for(const f of files) state.queue.push(f);
+    log(`Queued ${files.length} file(s). Total: ${state.queue.length}`);
+  }
 
   // ---------- Constants ----------
   const LETTER_W = 612, LETTER_H = 792;
   const MARGIN = 36;          // 0.5"
-  const HEADER_BAND = 54;     // 0.75" safe zone for header
+  const HEADER_BAND = 54;     // 0.75"
   const FONT_SIZE = 10;
   const APP_RE = /^appendix[\s_\-]*([0-9]+)(?:[^\d]*(\d+))?(?:.*?\((\d+)\s*of\s*(\d+)\))?/i;
 
@@ -49,7 +54,7 @@
       const ay=a.key.part_y, by=b.key.part_y;
       if(ay==null && by!=null) return 1;
       if(ay!=null && by==null) return -1;
-      if(ay!=null && ay!==by) return ay-by;
+      if(ay!=null && by!=null && ay!==by) return ay-by;
       return a.name.localeCompare(b.name);
     });
     const groups=[]; let cur=null;
@@ -64,7 +69,6 @@
   }
 
   async function bytes(file){ return new Uint8Array(await file.arrayBuffer()); }
-
   async function imageDims(file){
     const url = URL.createObjectURL(file);
     try{
@@ -74,19 +78,10 @@
       return await p;
     } finally { URL.revokeObjectURL(url); }
   }
-
-  function fitWithin(sw, sh, dw, dh){
-    const s = Math.min(dw/sw, dh/sh);
-    return { w: sw*s, h: sh*s };
-  }
-
   async function countPdfPages(u8){
-    try{
-      const src = await PDFDocument.load(u8, { ignoreEncryption: true });
-      return src.getPageCount();
-    }catch(e){ return 0; }
+    try{ const src = await PDFDocument.load(u8, { ignoreEncryption: true }); return src.getPageCount(); }
+    catch(e){ return 0; }
   }
-
   function headerLabelFor(nameWithExt, header){
     const base = nameWithExt.replace(/\.[^/.]+$/, '');
     return (header && header.trim().length>0) ? `${base} – ${header}` : base;
@@ -95,13 +90,6 @@
   // ---------- Drag & drop ----------
   const dz = $('dropzone');
   const filesInput = $('files');
-  function addFiles(fileList){
-    const dt = new DataTransfer();
-    for(const f of filesInput.files) dt.items.add(f);
-    for(const f of fileList) dt.items.add(f);
-    filesInput.files = dt.files;
-    log(`Queued ${fileList.length} file(s). Total: ${filesInput.files.length}`);
-  }
   ['dragenter','dragover'].forEach(ev=>{
     window.addEventListener(ev,(e)=>{ e.preventDefault(); dz.classList.add('dragover'); });
   });
@@ -110,18 +98,23 @@
   });
   dz.addEventListener('drop',(e)=>{
     e.preventDefault(); dz.classList.remove('dragover');
-    const files = Array.from(e.dataTransfer.files||[]);
-    if(files.length) addFiles(files);
+    const files = Array.from(e.dataTransfer?.files || []);
+    if(files.length) addToQueue(files);
   });
   $('pickBtn').addEventListener('click', ()=> filesInput.click());
+  filesInput.addEventListener('change', ()=>{
+    const files = Array.from(filesInput.files || []);
+    if(files.length) addToQueue(files);
+    filesInput.value = '';
+  });
 
   // ---------- Main run ----------
   async function run(){
-    if(!$('keepHistory').checked){ $('links').innerHTML=''; }
+    if(!$('keepHistory').checked){ $('links').innerHTML=''; state.outputs.length=0; }
     clearLog(); setProgress(0,'Scanning files…');
 
     const header = $('headerText').value || '';
-    const allFiles = Array.from(filesInput.files||[]);
+    const allFiles = state.queue.slice();
     if(allFiles.length===0){ alert('Select or drop files first'); return; }
 
     const groups = sortIntoGroups(allFiles);
@@ -136,7 +129,6 @@
     }
     if(totalPlannedPages===0){ log('ERROR: No renderable pages (bad PDFs or no images).'); return; }
 
-    const outputs = [];
     let batchIdx = 1;
     let doc = await PDFDocument.create();
     let font = await doc.embedFont(StandardFonts.Helvetica);
@@ -148,7 +140,7 @@
       const pdfBytes = await doc.save({ updateFieldAppearances:false });
       const blob = new Blob([pdfBytes], {type:'application/pdf'});
       const name = `batch_${String(batchIdx).padStart(3,'0')}.pdf`;
-      outputs.push({name, blob});
+      state.outputs.push({name, blob});
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = name;
@@ -194,11 +186,10 @@
             }
             for(let i=0;i<total;i++){
               const page = doc.addPage([LETTER_W, LETTER_H]);
-              // header in safe top-right
               const right = LETTER_W - MARGIN;
               const textWidth = font.widthOfTextAtSize(label, FONT_SIZE);
               page.drawText(label, { x: right - textWidth, y: LETTER_H - MARGIN - FONT_SIZE - 4, size: FONT_SIZE, font, color: rgb(0,0,0) });
-              // content
+
               const dstW = LETTER_W - 2*MARGIN;
               const dstH = LETTER_H - (MARGIN + HEADER_BAND) - MARGIN;
               const srcPage = src.getPage(i);
@@ -226,11 +217,11 @@
             const width = landscape ? LETTER_H : LETTER_W;
             const height = landscape ? LETTER_W : LETTER_H;
             const page = doc.addPage([width, height]);
-            // header in safe top-right
+
             const right = width - MARGIN;
             const textWidth = font.widthOfTextAtSize(label, FONT_SIZE);
             page.drawText(label, { x: right - textWidth, y: height - MARGIN - FONT_SIZE - 4, size: FONT_SIZE, font, color: rgb(0,0,0) });
-            // image
+
             let img;
             if(/\.png$/i.test(it.name)) img = await doc.embedPng(u8); else img = await doc.embedJpg(u8);
             const dstW = width - 2*MARGIN;
@@ -241,6 +232,7 @@
             const cx = MARGIN + (dstW - drawW)/2;
             const cy = MARGIN + (dstH - drawH)/2;
             page.drawImage(img, { x: cx, y: cy, width: drawW, height: drawH });
+
             curPages += 1; donePages += 1;
             setProgress((donePages/totalPlannedPages)*100, `Rendering… ${donePages}/${totalPlannedPages} pages`);
             manifest.push([it.name, group.appendix_num, it.key.part_y ?? "", "false", 1, batchIdx, batchStartPage, batchStartPage]);
@@ -255,11 +247,10 @@
     await finalize();
 
     // manifest.csv
-    const csvRows = [["input_name","appendix_num","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]];
-    for(const r of csvRows.slice(1)){} // placeholder to keep style consistent
-    const csvBody = [["input_name","appendix_num","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]];
-    // We already built manifest with header; re-use it directly:
-    const csv = manifest.map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const csv = [["input_name","appendix_num","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]]
+      .concat(manifest.slice(1))
+      .map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(','))
+      .join('\\n');
     const blob = new Blob([csv], {type:'text/csv'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -267,15 +258,11 @@
     a.textContent = '⬇ manifest.csv';
     $('links').appendChild(a);
 
-    $('zipBtn').disabled = false;
+    // ZIP from in-memory blobs
+    $('zipBtn').disabled = state.outputs.length === 0;
     $('zipBtn').onclick = async ()=>{
       const zip = new JSZip();
-      const linkEls = Array.from($('links').querySelectorAll('a')).filter(a=>/batch_\d+\.pdf$/.test(a.download));
-      for(const l of linkEls){
-        const resp = await fetch(l.href);
-        const b = await resp.blob();
-        zip.file(l.download, b);
-      }
+      for(const o of state.outputs) zip.file(o.name, o.blob);
       zip.file('manifest.csv', blob);
       const z = await zip.generateAsync({type:'blob'});
       const link = document.createElement('a');
@@ -290,13 +277,14 @@
 
   // ---------- Buttons ----------
   $('runBtn').addEventListener('click', ()=>{
-    if(!$('keepHistory').checked){ $('links').innerHTML=''; }
+    if(!$('keepHistory').checked){ $('links').innerHTML=''; state.outputs.length=0; }
     $('progressBar').style.width='0%';
     $('progressText').textContent='Starting…';
     run().catch(e=>{ console.error(e); log('FATAL: '+(e.message||e)); setProgress(0,'Error'); });
   });
   $('clearBtn').addEventListener('click', ()=>{
-    $('files').value=''; $('headerText').value=''; $('targetPages').value=50; $('links').innerHTML='';
+    state.queue.length=0;
+    $('headerText').value=''; $('targetPages').value=50; $('links').innerHTML='';
     clearLog(); setProgress(0,'Idle');
   });
   $('zipBtn').disabled = true;
