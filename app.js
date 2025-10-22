@@ -17,6 +17,11 @@
     $('progressBar').style.width = `${Math.max(0,Math.min(100,pct))}%`;
     if(text) $('progressText').textContent = text;
   }
+  function showSaving(on){
+    const el = $('savingWrap');
+    if(on){ el.classList.remove('hidden'); }
+    else { el.classList.add('hidden'); }
+  }
   function updateDropzoneBadge(){
     const badge = document.querySelector('#dropzone .dz-title');
     if(!badge) return;
@@ -40,16 +45,10 @@
   const FONT_SIZE = 10;
 
   // Regex supports numeric OR alphabetic appendix labels, optional bare part number, or (y of Y)
-  // Examples matched:
-  //  "Appendix 12 (3 of 7)"
-  //  "Appendix AA (2 of 5)"
-  //  "Appendix B 4"
-  //  "Appendix 7"
   const APP_RE = /^appendix[\s_\-]*([A-Z]+|\d+)(?:[^\d(]*?(\d+))?(?:.*?\((\d+)\s*of\s*(\d+)\))?/i;
 
   // ---------- Utils ----------
   function lettersToOrder(s){
-    // A=1 ... Z=26, AA=27 ...
     s = s.toUpperCase();
     let n = 0;
     for(let i=0;i<s.length;i++){
@@ -69,7 +68,6 @@
     const appendix_order = isAlpha ? lettersToOrder(label) : parseInt(label,10);
     if(appendix_order==null || Number.isNaN(appendix_order)) return null;
 
-    // part_y: prefer (y of Y), else bare number found after label
     const bareAfter = m[2] ? parseInt(m[2],10) : null;
     const y = m[3] ? parseInt(m[3],10) : null;
     const Y = m[4] ? parseInt(m[4],10) : null;
@@ -91,7 +89,6 @@
       if(ay==null && by!=null) return 1;
       if(ay!=null && by==null) return -1;
       if(ay!=null && by!=null && ay!==by) return ay-by;
-      // final tiebreaker: original name
       return a.name.localeCompare(b.name);
     });
     const groups=[]; let cur=null;
@@ -175,23 +172,27 @@
 
     async function finalize(){
       if(curPages===0) return;
-      const pdfBytes = await doc.save({ updateFieldAppearances:false });
-      const blob = new Blob([pdfBytes], {type:'application/pdf'});
-      const name = `batch_${String(batchIdx).padStart(3,'0')}.pdf`;
-      state.outputs.push({name, blob});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      a.textContent = `⬇ ${name}`;
-      $('links').appendChild(a);
-      log(`Saved ${name} (${curPages} pages)`);
+      showSaving(true);
+      $('progressText').textContent = `Saving batch ${String(batchIdx).padStart(3,'0')}…`;
+      try{
+        const pdfBytes = await doc.save({ updateFieldAppearances:false });
+        const blob = new Blob([pdfBytes], {type:'application/pdf'});
+        const name = `batch_${String(batchIdx).padStart(3,'0')}.pdf`;
+        state.outputs.push({name, blob});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.textContent = `⬇ ${name}`;
+        $('links').appendChild(a);
+        log(`Saved ${name} (${curPages} pages)`);
+      } finally {
+        showSaving(false);
+      }
       batchIdx += 1;
       doc = await PDFDocument.create();
       font = await doc.embedFont(StandardFonts.Helvetica);
       curPages = 0;
     }
-
-    const manifest = [["input_name","appendix_label","appendix_order","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]];
 
     for(const group of groups){
       // Count this appendix
@@ -209,7 +210,6 @@
       }
 
       log(`Rendering Appendix ${group.label} (~${appendixPages} pages)`);
-      let batchStartPage = curPages + 1;
 
       for(const it of group.items){
         const label = headerLabelFor(it.name, header);
@@ -252,9 +252,6 @@
               curPages += 1; donePages += 1;
               setProgress((donePages/totalPlannedPages)*100, `Rendering… ${donePages}/${totalPlannedPages} pages`);
             }
-
-            manifest.push([it.name, group.label, group.appendix_order, it.key.part_y ?? "", "true", total, batchIdx, batchStartPage, batchStartPage+total-1]);
-            batchStartPage += total;
           }catch(e){
             log(`ERROR: PDF load failed: ${it.name}. Skipped. (${e.message||e})`);
           }
@@ -284,8 +281,6 @@
 
             curPages += 1; donePages += 1;
             setProgress((donePages/totalPlannedPages)*100, `Rendering… ${donePages}/${totalPlannedPages} pages`);
-            manifest.push([it.name, group.label, group.appendix_order, it.key.part_y ?? "", "false", 1, batchIdx, batchStartPage, batchStartPage]);
-            batchStartPage += 1;
           }catch(e){
             log(`ERROR: Image failed: ${it.name}. Skipped. (${e.message||e})`);
           }
@@ -295,24 +290,10 @@
 
     await finalize();
 
-    // manifest.csv
-    const csv = [["input_name","appendix_label","appendix_order","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]]
-      .concat(manifest.slice(1))
-      .map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(','))
-      .join('\\n');
-    const blob = new Blob([csv], {type:'text/csv'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'manifest.csv';
-    a.textContent = '⬇ manifest.csv';
-    $('links').appendChild(a);
-
-    // ZIP from in-memory blobs
     $('zipBtn').disabled = state.outputs.length === 0;
     $('zipBtn').onclick = async ()=>{
       const zip = new JSZip();
       for(const o of state.outputs) zip.file(o.name, o.blob);
-      zip.file('manifest.csv', blob);
       const z = await zip.generateAsync({type:'blob'});
       const link = document.createElement('a');
       link.href = URL.createObjectURL(z);

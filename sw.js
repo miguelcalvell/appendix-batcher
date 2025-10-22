@@ -1,6 +1,6 @@
-// bump cache to v6.3 to force refresh
+// bump cache to v6.4 to force refresh
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open('appendix-batcher-v6.3').then(cache => cache.addAll([
+  e.waitUntil(caches.open('appendix-batcher-v6.4').then(cache => cache.addAll([
     './', './index.html', './style.css', './app.js', './manifest.json',
     'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
     'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
