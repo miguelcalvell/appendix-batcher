@@ -1,4 +1,5 @@
 (function(){
+  const VERSION = 'v6.6';
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
 
   // ---------- State & DOM helpers ----------
@@ -18,16 +19,20 @@
     if(text) $('progressText').textContent = text;
   }
   function showSaving(on, label){
-    const el = $('savingWrap');
+    const wrap = $('savingWrap');
+    const lbl = $('savingLabel');
     if(on){
-      if(label) $('progressText').textContent = label;
-      el.classList.remove('hidden');
+      if(label) lbl.textContent = label;
+      wrap.classList.remove('hidden');
+      // force reflow so browser must paint the visible state
+      // eslint-disable-next-line no-unused-expressions
+      wrap.offsetWidth;
     } else {
-      el.classList.add('hidden');
+      wrap.classList.add('hidden');
     }
   }
-  function rafTick(){ return new Promise(res=>requestAnimationFrame(()=>res())); }
-  function microTick(){ return Promise.resolve(); } // separate microtask
+  const raf = () => new Promise(res=>requestAnimationFrame(()=>res()));
+  const delay = (ms) => new Promise(res=>setTimeout(res, ms));
 
   function updateDropzoneBadge(){
     const badge = document.querySelector('#dropzone .dz-title');
@@ -181,9 +186,15 @@
 
       async function finalize(){
         if(curPages===0) return;
-        showSaving(true, `Saving batch ${String(batchIdx).padStart(3,'0')}…`);
-        await rafTick(); // let the browser paint the indicator
-        await microTick(); // ensure JS yields before heavy work
+        const label = `Saving batch ${String(batchIdx).padStart(3,'0')}…`;
+        showSaving(true, label);
+        // force browser to paint the indicator BEFORE heavy work
+        // 1) reflow already forced in showSaving()
+        // 2) two RAF ticks
+        await raf(); await raf();
+        // 3) small timeout to yield main thread on some browsers
+        await delay(40);
+
         try{
           const pdfBytes = await doc.save({ updateFieldAppearances:false });
           const blob = new Blob([pdfBytes], {type:'application/pdf'});
@@ -331,6 +342,7 @@
   });
   $('zipBtn').disabled = true;
 
-  // init DZ label
+  // init DZ label + footer version
   updateDropzoneBadge();
+  const ver = document.getElementById('version'); if(ver){ ver.textContent = VERSION; }
 })();

@@ -63,7 +63,7 @@
         <div id="progressText" class="progress-text">Idle</div>
         <div class="progressbar"><div id="progressBar" class="progressbar-fill" style="width:0%"></div></div>
         <div id="savingWrap" class="progress-wrap saving hidden">
-          <div class="progress-text">Saving PDF…</div>
+          <div id="savingLabel" class="progress-text">Saving PDF…</div>
           <div class="progressbar indeterminate"><div class="progressbar-fill"></div></div>
         </div>
       </div>
@@ -82,7 +82,7 @@
   </main>
 
   <footer>
-    <p>All processing is local in your browser. No data is uploaded.</p>
+    <p>All processing is local in your browser. No data is uploaded. <span id="version"></span></p>
   </footer>
 
   <script>
