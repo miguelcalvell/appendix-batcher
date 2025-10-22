@@ -3,7 +3,7 @@
 
   // ---------- State & DOM helpers ----------
   const $ = (id)=>document.getElementById(id);
-  const state = { queue: [], outputs: [] };
+  const state = { queue: [], outputs: [], queuedCount: 0 };
   const logBuf = [];
   function log(msg){
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
@@ -17,9 +17,20 @@
     $('progressBar').style.width = `${Math.max(0,Math.min(100,pct))}%`;
     if(text) $('progressText').textContent = text;
   }
+  function updateDropzoneBadge(){
+    const badge = document.querySelector('#dropzone .dz-title');
+    if(!badge) return;
+    badge.textContent = state.queuedCount>0 ? `Queued: ${state.queuedCount} file(s)` : 'Drag & drop files here';
+  }
   function addToQueue(files){
-    for(const f of files) state.queue.push(f);
-    log(`Queued ${files.length} file(s). Total: ${state.queue.length}`);
+    let added = 0;
+    for(const f of files){
+      state.queue.push(f);
+      added++;
+      state.queuedCount++;
+    }
+    log(`Queued ${added} file(s). Total: ${state.queuedCount}`);
+    updateDropzoneBadge();
   }
 
   // ---------- Constants ----------
@@ -78,7 +89,7 @@
       return await p;
     } finally { URL.revokeObjectURL(url); }
   }
-  async function countPdfPages(u8){
+  async function countPdfPagesFromBytes(u8){
     try{ const src = await PDFDocument.load(u8, { ignoreEncryption: true }); return src.getPageCount(); }
     catch(e){ return 0; }
   }
@@ -120,10 +131,11 @@
     const groups = sortIntoGroups(allFiles);
     log(`Found ${groups.length} appendices`);
 
+    // Pre-count planned pages
     let totalPlannedPages = 0;
     for(const g of groups){
       for(const it of g.items){
-        if(it.isPDF) totalPlannedPages += (await countPdfPages(await bytes(it.file))) || 0;
+        if(it.isPDF) totalPlannedPages += (await countPdfPagesFromBytes(await bytes(it.file))) || 0;
         else totalPlannedPages += 1;
       }
     }
@@ -156,10 +168,14 @@
     const manifest = [["input_name","appendix_num","part_y","is_pdf","pages_in_item","batch","batch_page_start","batch_page_end"]];
 
     for(const group of groups){
+      // Count this appendix
       let appendixPages = 0;
+      const appendixPageCounts = [];
       for(const it of group.items){
-        if(it.isPDF) appendixPages += (await countPdfPages(await bytes(it.file))) || 0;
-        else appendixPages += 1;
+        if(it.isPDF){
+          const pc = (await countPdfPagesFromBytes(await bytes(it.file))) || 0;
+          appendixPages += pc; appendixPageCounts.push(pc);
+        } else { appendixPages += 1; appendixPageCounts.push(1); }
       }
       const targetPages = Math.max(1, parseInt(($('targetPages').value||'50'),10));
       if(curPages>0 && (curPages + appendixPages) > targetPages){
@@ -177,14 +193,23 @@
             const u8 = await bytes(it.file);
             const src = await PDFDocument.load(u8, { ignoreEncryption:true });
             const total = src.getPageCount();
-            let embeddedPages;
-            try{
-              embeddedPages = await doc.embedPdf(u8);
-            }catch(e){
-              log(`ERROR: Embed PDF failed: ${it.name}. Skipping. (${e.message||e})`);
-              continue;
-            }
+
             for(let i=0;i<total;i++){
+              let embedded;
+              try {
+                // Use loaded source doc rather than raw bytes (more reliable)
+                const arr = await doc.embedPdf(src, [i]);
+                embedded = arr && arr[0];
+              } catch (e) {
+                log(`ERROR: Embed page ${i+1}/${total} failed: ${it.name}. (${e.message||e})`);
+                continue;
+              }
+              if(!embedded){
+                log(`ERROR: Missing embedded page ${i+1}/${total}: ${it.name}.`);
+                continue;
+              }
+
+              // Build a new Letter page and draw header + scaled content box
               const page = doc.addPage([LETTER_W, LETTER_H]);
               const right = LETTER_W - MARGIN;
               const textWidth = font.widthOfTextAtSize(label, FONT_SIZE);
@@ -192,18 +217,20 @@
 
               const dstW = LETTER_W - 2*MARGIN;
               const dstH = LETTER_H - (MARGIN + HEADER_BAND) - MARGIN;
-              const srcPage = src.getPage(i);
-              const { width:sW, height:sH } = srcPage.getSize();
+
+              // Source page size comes from src.getPage(i)
+              const { width:sW, height:sH } = src.getPage(i).getSize();
               const scale = Math.min(dstW/sW, dstH/sH);
               const drawW = sW*scale, drawH = sH*scale;
               const cx = MARGIN + (dstW - drawW)/2;
               const cy = MARGIN + (dstH - drawH)/2;
-              const ep = embeddedPages[i];
-              page.drawPage(ep, { x: cx, y: cy, width: drawW, height: drawH });
+
+              page.drawPage(embedded, { x: cx, y: cy, width: drawW, height: drawH });
 
               curPages += 1; donePages += 1;
               setProgress((donePages/totalPlannedPages)*100, `Rendering… ${donePages}/${totalPlannedPages} pages`);
             }
+
             manifest.push([it.name, group.appendix_num, it.key.part_y ?? "", "true", total, batchIdx, batchStartPage, batchStartPage+total-1]);
             batchStartPage += total;
           }catch(e){
@@ -283,9 +310,12 @@
     run().catch(e=>{ console.error(e); log('FATAL: '+(e.message||e)); setProgress(0,'Error'); });
   });
   $('clearBtn').addEventListener('click', ()=>{
-    state.queue.length=0;
+    state.queue.length=0; state.queuedCount=0; updateDropzoneBadge();
     $('headerText').value=''; $('targetPages').value=50; $('links').innerHTML='';
     clearLog(); setProgress(0,'Idle');
   });
   $('zipBtn').disabled = true;
+
+  // init DZ label
+  updateDropzoneBadge();
 })();
