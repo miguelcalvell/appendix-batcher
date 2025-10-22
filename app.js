@@ -3,7 +3,7 @@
 
   // ---------- State & DOM helpers ----------
   const $ = (id)=>document.getElementById(id);
-  const state = { queue: [], outputs: [], queuedCount: 0 };
+  const state = { queue: [], outputs: [], queuedCount: 0, running:false };
   const logBuf = [];
   function log(msg){
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
@@ -17,11 +17,18 @@
     $('progressBar').style.width = `${Math.max(0,Math.min(100,pct))}%`;
     if(text) $('progressText').textContent = text;
   }
-  function showSaving(on){
+  function showSaving(on, label){
     const el = $('savingWrap');
-    if(on){ el.classList.remove('hidden'); }
-    else { el.classList.add('hidden'); }
+    if(on){
+      if(label) $('progressText').textContent = label;
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
   }
+  function rafTick(){ return new Promise(res=>requestAnimationFrame(()=>res())); }
+  function microTick(){ return Promise.resolve(); } // separate microtask
+
   function updateDropzoneBadge(){
     const badge = document.querySelector('#dropzone .dz-title');
     if(!badge) return;
@@ -43,8 +50,6 @@
   const MARGIN = 36;          // 0.5"
   const HEADER_BAND = 54;     // 0.75"
   const FONT_SIZE = 10;
-
-  // Regex supports numeric OR alphabetic appendix labels, optional bare part number, or (y of Y)
   const APP_RE = /^appendix[\s_\-]*([A-Z]+|\d+)(?:[^\d(]*?(\d+))?(?:.*?\((\d+)\s*of\s*(\d+)\))?/i;
 
   // ---------- Utils ----------
@@ -144,165 +149,172 @@
 
   // ---------- Main run ----------
   async function run(){
-    if(!$('keepHistory').checked){ $('links').innerHTML=''; state.outputs.length=0; }
-    clearLog(); setProgress(0,'Scanning files…');
+    if(state.running) return;
+    state.running = true;
+    $('runBtn').disabled = true;
+    try{
+      if(!$('keepHistory').checked){ $('links').innerHTML=''; state.outputs.length=0; }
+      clearLog(); setProgress(0,'Scanning files…');
 
-    const header = $('headerText').value || '';
-    const allFiles = state.queue.slice();
-    if(allFiles.length===0){ alert('Select or drop files first'); return; }
+      const header = $('headerText').value || '';
+      const allFiles = state.queue.slice();
+      if(allFiles.length===0){ alert('Select or drop files first'); return; }
 
-    const groups = sortIntoGroups(allFiles);
-    log(`Found ${groups.length} appendices`);
+      const groups = sortIntoGroups(allFiles);
+      log(`Found ${groups.length} appendices`);
 
-    // Pre-count planned pages
-    let totalPlannedPages = 0;
-    for(const g of groups){
-      for(const it of g.items){
-        if(it.isPDF) totalPlannedPages += (await countPdfPagesFromBytes(await bytes(it.file))) || 0;
-        else totalPlannedPages += 1;
+      // Pre-count planned pages
+      let totalPlannedPages = 0;
+      for(const g of groups){
+        for(const it of g.items){
+          if(it.isPDF) totalPlannedPages += (await countPdfPagesFromBytes(await bytes(it.file))) || 0;
+          else totalPlannedPages += 1;
+        }
       }
-    }
-    if(totalPlannedPages===0){ log('ERROR: No renderable pages (bad PDFs or no images).'); return; }
+      if(totalPlannedPages===0){ log('ERROR: No renderable pages (bad PDFs or no images).'); return; }
 
-    let batchIdx = 1;
-    let doc = await PDFDocument.create();
-    let font = await doc.embedFont(StandardFonts.Helvetica);
-    let curPages = 0;
-    let donePages = 0;
+      let batchIdx = 1;
+      let doc = await PDFDocument.create();
+      let font = await doc.embedFont(StandardFonts.Helvetica);
+      let curPages = 0;
+      let donePages = 0;
 
-    async function finalize(){
-      if(curPages===0) return;
-      showSaving(true);
-      $('progressText').textContent = `Saving batch ${String(batchIdx).padStart(3,'0')}…`;
-      try{
-        const pdfBytes = await doc.save({ updateFieldAppearances:false });
-        const blob = new Blob([pdfBytes], {type:'application/pdf'});
-        const name = `batch_${String(batchIdx).padStart(3,'0')}.pdf`;
-        state.outputs.push({name, blob});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = name;
-        a.textContent = `⬇ ${name}`;
-        $('links').appendChild(a);
-        log(`Saved ${name} (${curPages} pages)`);
-      } finally {
-        showSaving(false);
-      }
-      batchIdx += 1;
-      doc = await PDFDocument.create();
-      font = await doc.embedFont(StandardFonts.Helvetica);
-      curPages = 0;
-    }
-
-    for(const group of groups){
-      // Count this appendix
-      let appendixPages = 0;
-      const appendixPageCounts = [];
-      for(const it of group.items){
-        if(it.isPDF){
-          const pc = (await countPdfPagesFromBytes(await bytes(it.file))) || 0;
-          appendixPages += pc; appendixPageCounts.push(pc);
-        } else { appendixPages += 1; appendixPageCounts.push(1); }
-      }
-      const targetPages = Math.max(1, parseInt(($('targetPages').value||'50'),10));
-      if(curPages>0 && (curPages + appendixPages) > targetPages){
-        await finalize();
+      async function finalize(){
+        if(curPages===0) return;
+        showSaving(true, `Saving batch ${String(batchIdx).padStart(3,'0')}…`);
+        await rafTick(); // let the browser paint the indicator
+        await microTick(); // ensure JS yields before heavy work
+        try{
+          const pdfBytes = await doc.save({ updateFieldAppearances:false });
+          const blob = new Blob([pdfBytes], {type:'application/pdf'});
+          const name = `batch_${String(batchIdx).padStart(3,'0')}.pdf`;
+          state.outputs.push({name, blob});
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = name;
+          a.textContent = `⬇ ${name}`;
+          $('links').appendChild(a);
+          log(`Saved ${name} (${curPages} pages)`);
+        } finally {
+          showSaving(false);
+        }
+        batchIdx += 1;
+        doc = await PDFDocument.create();
+        font = await doc.embedFont(StandardFonts.Helvetica);
+        curPages = 0;
       }
 
-      log(`Rendering Appendix ${group.label} (~${appendixPages} pages)`);
+      for(const group of groups){
+        // Count this appendix
+        let appendixPages = 0;
+        for(const it of group.items){
+          if(it.isPDF){
+            appendixPages += (await countPdfPagesFromBytes(await bytes(it.file))) || 0;
+          } else { appendixPages += 1; }
+        }
+        const targetPages = Math.max(1, parseInt(($('targetPages').value||'50'),10));
+        if(curPages>0 && (curPages + appendixPages) > targetPages){
+          await finalize();
+        }
 
-      for(const it of group.items){
-        const label = headerLabelFor(it.name, header);
+        log(`Rendering Appendix ${group.label} (~${appendixPages} pages)`);
 
-        if(it.isPDF){
-          try{
-            const u8 = await bytes(it.file);
-            const src = await PDFDocument.load(u8, { ignoreEncryption:true });
-            const total = src.getPageCount();
+        for(const it of group.items){
+          const label = headerLabelFor(it.name, header);
 
-            for(let i=0;i<total;i++){
-              let embedded;
-              try {
-                const arr = await doc.embedPdf(src, [i]);
-                embedded = arr && arr[0];
-              } catch (e) {
-                log(`ERROR: Embed page ${i+1}/${total} failed: ${it.name}. (${e.message||e})`);
-                continue;
+          if(it.isPDF){
+            try{
+              const u8 = await bytes(it.file);
+              const src = await PDFDocument.load(u8, { ignoreEncryption:true });
+              const total = src.getPageCount();
+
+              for(let i=0;i<total;i++){
+                let embedded;
+                try {
+                  const arr = await doc.embedPdf(src, [i]);
+                  embedded = arr && arr[0];
+                } catch (e) {
+                  log(`ERROR: Embed page ${i+1}/${total} failed: ${it.name}. (${e.message||e})`);
+                  continue;
+                }
+                if(!embedded){
+                  log(`ERROR: Missing embedded page ${i+1}/${total}: ${it.name}.`);
+                  continue;
+                }
+
+                const page = doc.addPage([LETTER_W, LETTER_H]);
+                const right = LETTER_W - MARGIN;
+                const textWidth = font.widthOfTextAtSize(label, FONT_SIZE);
+                page.drawText(label, { x: right - textWidth, y: LETTER_H - MARGIN - FONT_SIZE - 4, size: FONT_SIZE, font, color: rgb(0,0,0) });
+
+                const dstW = LETTER_W - 2*MARGIN;
+                const dstH = LETTER_H - (MARGIN + HEADER_BAND) - MARGIN;
+                const { width:sW, height:sH } = src.getPage(i).getSize();
+                const scale = Math.min(dstW/sW, dstH/sH);
+                const drawW = sW*scale, drawH = sH*scale;
+                const cx = MARGIN + (dstW - drawW)/2;
+                const cy = MARGIN + (dstH - drawH)/2;
+
+                page.drawPage(embedded, { x: cx, y: cy, width: drawW, height: drawH });
+
+                curPages += 1; donePages += 1;
+                setProgress((donePages/totalPlannedPages)*100, `Rendering… ${donePages}/${totalPlannedPages} pages`);
               }
-              if(!embedded){
-                log(`ERROR: Missing embedded page ${i+1}/${total}: ${it.name}.`);
-                continue;
-              }
+            }catch(e){
+              log(`ERROR: PDF load failed: ${it.name}. Skipped. (${e.message||e})`);
+            }
+          } else {
+            try{
+              const u8 = await bytes(it.file);
+              const dims = await imageDims(it.file);
+              const landscape = dims.w >= dims.h;
+              const width = landscape ? LETTER_H : LETTER_W;
+              const height = landscape ? LETTER_W : LETTER_H;
+              const page = doc.addPage([width, height]);
 
-              const page = doc.addPage([LETTER_W, LETTER_H]);
-              const right = LETTER_W - MARGIN;
+              const right = width - MARGIN;
               const textWidth = font.widthOfTextAtSize(label, FONT_SIZE);
-              page.drawText(label, { x: right - textWidth, y: LETTER_H - MARGIN - FONT_SIZE - 4, size: FONT_SIZE, font, color: rgb(0,0,0) });
+              page.drawText(label, { x: right - textWidth, y: height - MARGIN - FONT_SIZE - 4, size: FONT_SIZE, font, color: rgb(0,0,0) });
 
-              const dstW = LETTER_W - 2*MARGIN;
-              const dstH = LETTER_H - (MARGIN + HEADER_BAND) - MARGIN;
-              const { width:sW, height:sH } = src.getPage(i).getSize();
+              let img;
+              if(/\.png$/i.test(it.name)) img = await doc.embedPng(u8); else img = await doc.embedJpg(u8);
+              const dstW = width - 2*MARGIN;
+              const dstH = height - (MARGIN + HEADER_BAND) - MARGIN;
+              const sW = img.width, sH = img.height;
               const scale = Math.min(dstW/sW, dstH/sH);
               const drawW = sW*scale, drawH = sH*scale;
               const cx = MARGIN + (dstW - drawW)/2;
               const cy = MARGIN + (dstH - drawH)/2;
-
-              page.drawPage(embedded, { x: cx, y: cy, width: drawW, height: drawH });
+              page.drawImage(img, { x: cx, y: cy, width: drawW, height: drawH });
 
               curPages += 1; donePages += 1;
               setProgress((donePages/totalPlannedPages)*100, `Rendering… ${donePages}/${totalPlannedPages} pages`);
+            }catch(e){
+              log(`ERROR: Image failed: ${it.name}. Skipped. (${e.message||e})`);
             }
-          }catch(e){
-            log(`ERROR: PDF load failed: ${it.name}. Skipped. (${e.message||e})`);
-          }
-        } else {
-          try{
-            const u8 = await bytes(it.file);
-            const dims = await imageDims(it.file);
-            const landscape = dims.w >= dims.h;
-            const width = landscape ? LETTER_H : LETTER_W;
-            const height = landscape ? LETTER_W : LETTER_H;
-            const page = doc.addPage([width, height]);
-
-            const right = width - MARGIN;
-            const textWidth = font.widthOfTextAtSize(label, FONT_SIZE);
-            page.drawText(label, { x: right - textWidth, y: height - MARGIN - FONT_SIZE - 4, size: FONT_SIZE, font, color: rgb(0,0,0) });
-
-            let img;
-            if(/\.png$/i.test(it.name)) img = await doc.embedPng(u8); else img = await doc.embedJpg(u8);
-            const dstW = width - 2*MARGIN;
-            const dstH = height - (MARGIN + HEADER_BAND) - MARGIN;
-            const sW = img.width, sH = img.height;
-            const scale = Math.min(dstW/sW, dstH/sH);
-            const drawW = sW*scale, drawH = sH*scale;
-            const cx = MARGIN + (dstW - drawW)/2;
-            const cy = MARGIN + (dstH - drawH)/2;
-            page.drawImage(img, { x: cx, y: cy, width: drawW, height: drawH });
-
-            curPages += 1; donePages += 1;
-            setProgress((donePages/totalPlannedPages)*100, `Rendering… ${donePages}/${totalPlannedPages} pages`);
-          }catch(e){
-            log(`ERROR: Image failed: ${it.name}. Skipped. (${e.message||e})`);
           }
         }
       }
+
+      await finalize();
+
+      $('zipBtn').disabled = state.outputs.length === 0;
+      $('zipBtn').onclick = async ()=>{
+        const zip = new JSZip();
+        for(const o of state.outputs) zip.file(o.name, o.blob);
+        const z = await zip.generateAsync({type:'blob'});
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(z);
+        link.download = 'appendix_batches.zip';
+        link.click();
+      };
+
+      setProgress(100, 'Done.');
+      log('Done.');
+    } finally {
+      state.running = false;
+      $('runBtn').disabled = false;
     }
-
-    await finalize();
-
-    $('zipBtn').disabled = state.outputs.length === 0;
-    $('zipBtn').onclick = async ()=>{
-      const zip = new JSZip();
-      for(const o of state.outputs) zip.file(o.name, o.blob);
-      const z = await zip.generateAsync({type:'blob'});
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(z);
-      link.download = 'appendix_batches.zip';
-      link.click();
-    };
-
-    setProgress(100, 'Done.');
-    log('Done.');
   }
 
   // ---------- Buttons ----------
