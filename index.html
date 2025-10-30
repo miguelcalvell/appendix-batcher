@@ -6,7 +6,6 @@
   <meta name="theme-color" content="#0f1115" />
   <title>Appendix Batcher</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- Libraries -->
   <script defer src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="app.js"></script>
@@ -38,10 +37,10 @@
 
       <div class="row">
         <label for="headerText">Header (top-right)</label>
-        <input id="headerText" type="text" placeholder="e.g. QA Batch 2025-10-22" />
+        <textarea id="headerText" rows="3" placeholder="e.g. PRO-0223203 v1.0&#10;M. de Azevedo&#10;13SEP2025"></textarea>
       </div>
       <div class="row">
-        <small style="color:#aab2c5">This will print on every page in the safe top-right band as: <strong>&lt;file name&gt; – &lt;your header&gt;</strong>.</small>
+        <small style="color:#aab2c5">Printed on every page in the safe top-right band as stacked lines. First line is prefixed with the file name.</small>
       </div>
 
       <div class="row">
