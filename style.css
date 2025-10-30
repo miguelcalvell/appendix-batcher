@@ -8,7 +8,8 @@ main{padding:16px;max-width:1100px;margin:0 auto}
 .panel{background:#121622;border:1px solid #1b2131;border-radius:12px;padding:12px;margin-bottom:16px}
 .controls .row{display:flex;gap:12px;align-items:center;margin:10px 0;flex-wrap:wrap}
 label{min-width:200px;color:#aab2c5;font-size:14px}
-input[type=text],input[type=number]{flex:1;min-width:240px;padding:12px;border-radius:10px;border:1px solid #313b52;background:#0e1322;color:#e7e9ee;font-size:16px}
+input[type=text],input[type=number],textarea{flex:1;min-width:240px;padding:12px;border-radius:10px;border:1px solid #313b52;background:#0e1322;color:#e7e9ee;font-size:16px}
+textarea{min-height:84px;resize:vertical}
 .row-inline{align-items:center}
 .switch{display:flex;align-items:center;gap:10px;color:#c8cfdf}
 button{background:#2563eb;color:#fff;border:0;padding:12px 16px;border-radius:10px;cursor:pointer;font-size:16px}
@@ -32,7 +33,6 @@ button:disabled{opacity:0.6;cursor:not-allowed}
 .progressbar{height:8px;background:#1e2636;border-radius:999px;overflow:hidden;position:relative}
 .progressbar-fill{height:100%;background:#3b82f6;width:0%}
 .hidden{display:none}
-/* Spinner during save() */
 .spinner{display:inline-block;width:22px;height:22px;border:3px solid #1e2636;border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite}
 .spinner.hidden{display:none !important}
 @keyframes spin{to{transform:rotate(360deg)}}
