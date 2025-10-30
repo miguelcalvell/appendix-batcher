@@ -1,8 +1,7 @@
 (function(){
-  const VERSION = 'v6.10';
+  const VERSION = 'v6.11 (Landscape + Multiline header)';
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
 
-  // ---------- State & DOM helpers ----------
   const $ = (id)=>document.getElementById(id);
   const state = { queue: [], outputs: [], queuedCount: 0, running:false };
   const logBuf = [];
@@ -10,7 +9,7 @@
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
     logBuf.push(line);
     if(logBuf.length>1500) logBuf.splice(0, logBuf.length-1500);
-    $('log').textContent = logBuf.join('\\n');
+    $('log').textContent = logBuf.join('\n');
     $('log').scrollTop = $('log').scrollHeight;
   }
   function clearLog(){ logBuf.length=0; $('log').textContent=''; }
@@ -20,8 +19,7 @@
   }
   function showSavingSpinner(on){
     const el = $('savingSpinner');
-    if(on){ el.classList.remove('hidden'); }
-    else { el.classList.add('hidden'); }
+    if(on){ el.classList.remove('hidden'); } else { el.classList.add('hidden'); }
   }
   const raf = () => new Promise(res=>requestAnimationFrame(()=>res()));
   const delay = (ms) => new Promise(res=>setTimeout(res, ms));
@@ -33,23 +31,19 @@
   }
   function addToQueue(files){
     let added = 0;
-    for(const f of files){
-      state.queue.push(f);
-      added++;
-      state.queuedCount++;
-    }
+    for(const f of files){ state.queue.push(f); added++; state.queuedCount++; }
     log(`Queued ${added} file(s). Total: ${state.queuedCount}`);
     updateDropzoneBadge();
   }
 
-  // ---------- Constants ----------
-  const LETTER_W = 612, LETTER_H = 792;
-  const MARGIN = 36;          // 0.5"
-  const HEADER_BAND = 54;     // 0.75"
+  // Landscape Letter
+  const LETTER_W = 792, LETTER_H = 612; // 11x8.5 in points
+  const MARGIN = 36;       // 0.5"
+  const HEADER_BAND = 54;  // 0.75"
   const FONT_SIZE = 10;
+  const LINE_GAP = 3;
   const APP_RE = /^appendix[\s_\-]*([A-Z]+|\d+)(?:[^\d(]*?(\d+))?(?:.*?\((\d+)\s*of\s*(\d+)\))?/i;
 
-  // ---------- Utils ----------
   function lettersToOrder(s){
     s = s.toUpperCase();
     let n = 0;
@@ -105,25 +99,19 @@
   }
 
   async function bytes(file){ return new Uint8Array(await file.arrayBuffer()); }
-  async function imageDims(file){
-    const url = URL.createObjectURL(file);
-    try{
-      const img = new Image();
-      const p = new Promise((res,rej)=>{ img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight}); img.onerror=rej; });
-      img.src = url;
-      return await p;
-    } finally { URL.revokeObjectURL(url); }
-  }
   async function countPdfPagesFromBytes(u8){
     try{ const src = await PDFDocument.load(u8, { ignoreEncryption: true }); return src.getPageCount(); }
     catch(e){ return 0; }
   }
-  function headerLabelFor(nameWithExt, header){
-    const base = nameWithExt.replace(/\.[^/.]+$/, '');
-    return (header && header.trim().length>0) ? `${base} – ${header}` : base;
+  function splitHeaderLines(fileNameWithExt, headerRaw){
+    const base = fileNameWithExt.replace(/\.[^/.]+$/, '');
+    const lines = (headerRaw || '').replace(/\r\n/g,'\n').split('\n');
+    const clean = lines.map(s=>s.trim()).filter(s=>s.length>0);
+    if(clean.length===0) return [`${base}`];
+    return [`${base} – ${clean[0]}`, ...clean.slice(1)];
   }
 
-  // ---------- Drag & drop ----------
+  // DnD
   const dz = $('dropzone');
   const filesInput = $('files');
   ['dragenter','dragover'].forEach(ev=>{
@@ -144,24 +132,22 @@
     filesInput.value = '';
   });
 
-  // ---------- Main run ----------
   async function run(){
     if(state.running) return;
     state.running = true;
     $('runBtn').disabled = true;
-    showSavingSpinner(false); // ensure hidden at start
+    showSavingSpinner(false);
     try{
       if(!$('keepHistory').checked){ $('links').innerHTML=''; state.outputs.length=0; }
       clearLog(); setProgress(0,'Scanning files…');
 
-      const header = $('headerText').value || '';
+      const headerRaw = $('headerText').value || '';
       const allFiles = state.queue.slice();
       if(allFiles.length===0){ alert('Select or drop files first'); return; }
 
       const groups = sortIntoGroups(allFiles);
       log(`Found ${groups.length} appendices`);
 
-      // Pre-count planned pages
       let totalPlannedPages = 0;
       const prepared = [];
       for(const g of groups){
@@ -174,16 +160,28 @@
       }
       if(totalPlannedPages===0){ log('ERROR: No renderable pages (bad PDFs or no images).'); return; }
 
+      const { Helvetica } = StandardFonts;
       let batchIdx = 1;
       let doc = await PDFDocument.create();
-      let font = await doc.embedFont(StandardFonts.Helvetica);
+      let font = await doc.embedFont(Helvetica);
       let curPages = 0;
       let donePages = 0;
+
+      const drawHeader = (page, lines)=>{
+        const right = LETTER_W - MARGIN;
+        let y = LETTER_H - MARGIN - FONT_SIZE - 4;
+        for(const ln of lines){
+          const w = font.widthOfTextAtSize(ln, FONT_SIZE);
+          page.drawText(ln, { x: right - w, y, size: FONT_SIZE, font, color: rgb(0,0,0) });
+          y -= (FONT_SIZE + LINE_GAP);
+          if(y < LETTER_H - MARGIN - HEADER_BAND) break;
+        }
+      };
 
       async function finalize(){
         if(curPages===0) return;
         showSavingSpinner(true);
-        await raf(); await delay(30); // let spinner paint
+        await raf();
         try{
           const pdfBytes = await doc.save({ updateFieldAppearances:false });
           const blob = new Blob([pdfBytes], {type:'application/pdf'});
@@ -195,16 +193,13 @@
           a.textContent = `⬇ ${name}`;
           $('links').appendChild(a);
           log(`Saved ${name} (${curPages} pages)`);
-        } finally {
-          showSavingSpinner(false);
-        }
+        } finally { showSavingSpinner(false); }
         batchIdx += 1;
         doc = await PDFDocument.create();
-        font = await doc.embedFont(StandardFonts.Helvetica);
+        font = await doc.embedFont(Helvetica);
         curPages = 0;
       }
 
-      // Build by appendix
       const byAppendix = new Map();
       for(const p of prepared){
         const key = p.groupOrder;
@@ -223,8 +218,12 @@
         log(`Rendering Appendix ${arr[0].label} (~${appendixPages} pages)`);
 
         for(const it of arr){
-          const label = headerLabelFor(it.name, header);
+          const headerLines = splitHeaderLines(it.name, headerRaw);
           log(`  • ${it.name}`);
+
+          const pageW = LETTER_W, pageH = LETTER_H; // Landscape
+          const dstW = pageW - 2*MARGIN;
+          const dstH = pageH - (MARGIN + HEADER_BAND) - MARGIN;
 
           if(it.isPDF){
             try{
@@ -237,25 +236,19 @@
                   const arr = await doc.embedPdf(src, [i]);
                   embedded = arr && arr[0];
                 }catch(e){
-                  log(`    ERROR: embed page ${i+1}/${total} failed (${e.message||e}).`);
-                  continue;
+                  log(`    ERROR: embed page ${i+1}/${total} failed (${e.message||e}).`); continue;
                 }
-                if(!embedded){
-                  log(`    ERROR: missing embedded page ${i+1}/${total}.`);
-                  continue;
-                }
-                const page = doc.addPage([LETTER_W, LETTER_H]);
-                const right = LETTER_W - MARGIN;
-                const textWidth = font.widthOfTextAtSize(label, FONT_SIZE);
-                page.drawText(label, { x: right - textWidth, y: LETTER_H - MARGIN - FONT_SIZE - 4, size: FONT_SIZE, font, color: rgb(0,0,0) });
+                if(!embedded){ log(`    ERROR: missing embedded page ${i+1}/${total}.`); continue; }
 
-                const dstW = LETTER_W - 2*MARGIN;
-                const dstH = LETTER_H - (MARGIN + HEADER_BAND) - MARGIN;
-                const { width:sW, height:sH } = src.getPage(i).getSize();
+                const srcSize = src.getPage(i).getSize();
+                const sW = srcSize.width, sH = srcSize.height;
                 const scale = Math.min(dstW/sW, dstH/sH);
                 const drawW = sW*scale, drawH = sH*scale;
                 const cx = MARGIN + (dstW - drawW)/2;
                 const cy = MARGIN + (dstH - drawH)/2;
+
+                const page = doc.addPage([pageW, pageH]);
+                drawHeader(page, headerLines);
                 page.drawPage(embedded, { x: cx, y: cy, width: drawW, height: drawH });
 
                 curPages += 1; donePages += 1;
@@ -266,29 +259,18 @@
             }
           } else {
             try{
-              const dims = await imageDims(it.file);
-              const landscape = dims.w >= dims.h;
-              const width = landscape ? LETTER_H : LETTER_W;
-              const height = landscape ? LETTER_W : LETTER_H;
-              const page = doc.addPage([width, height]);
-              const right = width - MARGIN;
-              const textWidth = font.widthOfTextAtSize(label, FONT_SIZE);
-              page.drawText(label, { x: right - textWidth, y: height - MARGIN - FONT_SIZE - 4, size: FONT_SIZE, font, color: rgb(0,0,0) });
-
-              let img;
-              try{ img = await doc.embedPng(it.bytes); }catch{}
-              if(!img){
-                try{ img = await doc.embedJpg(it.bytes); }catch{}
-              }
+              let img; try{ img = await doc.embedPng(it.bytes); }catch{}
+              if(!img){ try{ img = await doc.embedJpg(it.bytes); }catch{} }
               if(!img){ log(`    ERROR: image embed failed: ${it.name}`); continue; }
 
-              const dstW = width - 2*MARGIN;
-              const dstH = height - (MARGIN + HEADER_BAND) - MARGIN;
               const sW = img.width, sH = img.height;
               const scale = Math.min(dstW/sW, dstH/sH);
               const drawW = sW*scale, drawH = sH*scale;
               const cx = MARGIN + (dstW - drawW)/2;
               const cy = MARGIN + (dstH - drawH)/2;
+
+              const page = doc.addPage([pageW, pageH]);
+              drawHeader(page, headerLines);
               page.drawImage(img, { x: cx, y: cy, width: drawW, height: drawH });
 
               curPages += 1; donePages += 1;
@@ -316,14 +298,14 @@
       setProgress(100, 'Done.');
       log('Done.');
     } finally {
-      showSavingSpinner(false); // ensure hidden no matter what
+      showSavingSpinner(false);
       state.running = false;
       $('runBtn').disabled = false;
       const ver = document.getElementById('version'); if(ver){ ver.textContent = VERSION; }
     }
   }
 
-  // ---------- Buttons ----------
+  // Buttons
   $('runBtn').addEventListener('click', ()=>{
     if(!$('keepHistory').checked){ $('links').innerHTML=''; state.outputs.length=0; }
     $('progressBar').style.width='0%';
@@ -337,7 +319,7 @@
   });
   $('zipBtn').disabled = true;
 
-  // init DZ label + version
+  // init
   updateDropzoneBadge();
   const ver = document.getElementById('version'); if(ver){ ver.textContent = VERSION; }
 })();
